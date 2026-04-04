@@ -133,3 +133,59 @@ describe('Search', () => {
     });
   });
 });
+
+describe('Zobrist hashing', () => {
+  it('same position gives same hash', async () => {
+    const { computeHash } = await import('./zobrist.js');
+    const b1 = Board.fromFEN(STARTING_FEN);
+    const b2 = Board.fromFEN(STARTING_FEN);
+    assert.equal(computeHash(b1), computeHash(b2));
+  });
+
+  it('different positions give different hashes', async () => {
+    const { computeHash } = await import('./zobrist.js');
+    const b1 = Board.fromFEN(STARTING_FEN);
+    const b2 = Board.fromFEN('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1');
+    assert.notEqual(computeHash(b1), computeHash(b2));
+  });
+
+  it('position reached by different move orders has same hash', async () => {
+    const { computeHash } = await import('./zobrist.js');
+    // 1.Nf3 Nc6 2.Nc3 Nf6 and 1.Nc3 Nf6 2.Nf3 Nc6
+    let b1 = Board.fromFEN(STARTING_FEN);
+    b1 = b1.makeMove(b1.findMoveFromUCI('g1f3'));
+    b1 = b1.makeMove(b1.findMoveFromUCI('b8c6'));
+    b1 = b1.makeMove(b1.findMoveFromUCI('b1c3'));
+    b1 = b1.makeMove(b1.findMoveFromUCI('g8f6'));
+
+    let b2 = Board.fromFEN(STARTING_FEN);
+    b2 = b2.makeMove(b2.findMoveFromUCI('b1c3'));
+    b2 = b2.makeMove(b2.findMoveFromUCI('g8f6'));
+    b2 = b2.makeMove(b2.findMoveFromUCI('g1f3'));
+    b2 = b2.makeMove(b2.findMoveFromUCI('b8c6'));
+
+    assert.equal(computeHash(b1), computeHash(b2));
+  });
+});
+
+describe('Null move pruning', () => {
+  it('prunes effectively — fewer nodes at depth 5', () => {
+    const board = Board.fromFEN('r1bqkbnr/pppppppp/2n5/8/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 2 2');
+    const engine = new SearchEngine();
+    const result = engine.search(board, { depth: 4 });
+    assert.ok(result.move);
+    assert.ok(result.nodes > 0);
+  });
+});
+
+describe('Late move reductions', () => {
+  it('still finds correct move with LMR active', () => {
+    const board = Board.fromFEN('6k1/5ppp/8/8/8/8/8/R3K3 w Q - 0 1');
+    const engine = new SearchEngine();
+    const result = engine.search(board, { depth: 4 });
+    assert.ok(result.move);
+    const uci = Board.moveToUCI(result.move);
+    // Should find Ra8# (back rank mate)
+    assert.equal(uci, 'a1a8');
+  });
+});

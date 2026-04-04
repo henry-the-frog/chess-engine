@@ -2,6 +2,7 @@
 
 import { Board, WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING } from './board.js';
 import { evaluate } from './eval.js';
+import { computeHash } from './zobrist.js';
 
 const INFINITY = 1000000;
 const MATE_SCORE = 100000;
@@ -33,14 +34,13 @@ function orderMoves(moves, ttMove) {
 
 // ===== Transposition Table =====
 class TTable {
-  constructor(size = 1 << 20) { // ~1M entries
+  constructor(size = 1 << 20) {
     this.size = size;
     this.table = new Map();
   }
 
-  // Simple position hash based on FEN (not Zobrist, but works)
   hash(board) {
-    return board.toFEN().split(' ').slice(0, 4).join(' ');
+    return computeHash(board);
   }
 
   get(board) {
@@ -49,7 +49,6 @@ class TTable {
 
   set(board, entry) {
     if (this.table.size >= this.size) {
-      // Simple eviction: clear half
       const keys = [...this.table.keys()];
       for (let i = 0; i < keys.length / 2; i++) this.table.delete(keys[i]);
     }
@@ -73,6 +72,11 @@ export class SearchEngine {
     this.startTime = 0;
     this.timeLimit = 0;
     this.stopped = false;
+  }
+
+  _isEndgame(board) {
+    // Endgame if no queens
+    return board.pieces[0][QUEEN] === 0n && board.pieces[1][QUEEN] === 0n;
   }
 
   // Quiescence search — resolve captures to avoid horizon effect
@@ -99,7 +103,7 @@ export class SearchEngine {
   }
 
   // Alpha-beta negamax
-  alphaBeta(board, depth, alpha, beta, ply = 0) {
+  alphaBeta(board, depth, alpha, beta, ply = 0, canNull = true) {
     // Time check
     if (this.timeLimit && Date.now() - this.startTime > this.timeLimit) {
       this.stopped = true;
@@ -118,11 +122,24 @@ export class SearchEngine {
 
     if (depth <= 0) return this.quiescence(board, alpha, beta);
 
+    const inCheck = board.inCheck();
+
+    // Null move pruning: skip our turn and see if opponent can still improve
+    // Don't use in check, at low depth, or in endgame with few pieces
+    if (canNull && !inCheck && depth >= 3 && !this._isEndgame(board)) {
+      const nullBoard = board.clone();
+      nullBoard.side = 1 - nullBoard.side;
+      nullBoard.epSquare = -1;
+      const R = depth >= 6 ? 3 : 2; // reduction
+      const nullScore = -this.alphaBeta(nullBoard, depth - 1 - R, -beta, -beta + 1, ply + 1, false);
+      if (nullScore >= beta) return beta;
+    }
+
     const moves = board.generateLegalMoves();
 
     // Checkmate / Stalemate
     if (moves.length === 0) {
-      if (board.inCheck()) return -MATE_SCORE + ply;
+      if (inCheck) return -MATE_SCORE + ply;
       return 0; // stalemate
     }
 
@@ -132,10 +149,24 @@ export class SearchEngine {
     let bestScore = -INFINITY;
     let bestMove = null;
     let ttType = TT_ALPHA;
+    let movesSearched = 0;
 
     for (const move of moves) {
       const newBoard = board.makeMove(move);
-      const score = -this.alphaBeta(newBoard, depth - 1, -beta, -alpha, ply + 1);
+
+      let score;
+      // Late Move Reductions (LMR): reduce depth for late quiet moves
+      if (movesSearched >= 4 && depth >= 3 && !inCheck && move.capture === undefined && move.promotion === undefined) {
+        // Reduced search
+        score = -this.alphaBeta(newBoard, depth - 2, -alpha - 1, -alpha, ply + 1, true);
+        // Re-search at full depth if it looks promising
+        if (score > alpha) {
+          score = -this.alphaBeta(newBoard, depth - 1, -beta, -alpha, ply + 1, true);
+        }
+      } else {
+        score = -this.alphaBeta(newBoard, depth - 1, -beta, -alpha, ply + 1, true);
+      }
+      movesSearched++;
 
       if (this.stopped) return 0;
 
