@@ -245,3 +245,37 @@ describe('Board', () => {
     });
   });
 });
+
+describe('Perft depth 5 (slow)', () => {
+  function perft(board, depth) {
+    if (depth === 0) return 1;
+    const moves = board.generateLegalMoves();
+    let nodes = 0;
+    for (const move of moves) nodes += perft(board.makeMove(move), depth - 1);
+    return nodes;
+  }
+
+  it('starting position depth 5 = 4865609', { timeout: 60000 }, () => {
+    assert.equal(perft(Board.fromFEN(STARTING_FEN), 5), 4865609);
+  });
+
+  it('Kiwipete depth 3 = 97862', () => {
+    const b = Board.fromFEN('r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1');
+    assert.equal(perft(b, 3), 97862);
+  });
+
+  it('Position 3 depth 3 = 2812', () => {
+    const b = Board.fromFEN('8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1');
+    assert.equal(perft(b, 3), 2812);
+  });
+
+  it('Position 4 depth 3 = 9467', () => {
+    const b = Board.fromFEN('r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1');
+    assert.equal(perft(b, 3), 9467);
+  });
+
+  it('Position 5 depth 2 = 1486', () => {
+    const b = Board.fromFEN('rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8');
+    assert.equal(perft(b, 2), 1486);
+  });
+});

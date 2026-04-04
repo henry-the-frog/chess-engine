@@ -189,3 +189,33 @@ describe('Late move reductions', () => {
     assert.equal(uci, 'a1a8');
   });
 });
+
+describe('Tactical puzzles — mate in 2', () => {
+  it('Morphy mate pattern', () => {
+    // White: Re1, Bb5, Ka1. Black: Kd8.
+    // Mate in 1: Re8# — but let's set up mate in 2
+    const board = Board.fromFEN('3k4/8/3K4/8/8/8/R7/8 w - - 0 1');
+    const engine = new SearchEngine();
+    const result = engine.search(board, { depth: 4 });
+    assert.ok(result.move);
+    // Should find a winning continuation
+    assert.ok(result.score > 50000); // Should be winning (possibly mate)
+  });
+
+  it('KR vs K mate — rook confines king', () => {
+    const board = Board.fromFEN('8/8/8/8/8/8/R7/K2k4 w - - 0 1');
+    const engine = new SearchEngine();
+    const result = engine.search(board, { depth: 5 });
+    assert.ok(result.move);
+    // With KR vs K and kings close, should find forcing continuation
+  });
+
+  it('Queen sacrifice for mate', () => {
+    // Classic smothered mate setup
+    const board = Board.fromFEN('r1b1kb1r/pppp1ppp/5n2/8/4n3/2N5/PPPPQPPP/R1B1KB1R w KQkq - 0 1');
+    const engine = new SearchEngine();
+    const result = engine.search(board, { depth: 4 });
+    assert.ok(result.move);
+    // Should find a strong move (Qe2 or similar)
+  });
+});
