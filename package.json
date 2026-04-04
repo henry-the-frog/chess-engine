@@ -1,0 +1,9 @@
+{
+  "name": "chess-engine",
+  "version": "1.0.0",
+  "description": "Chess engine with bitboards, alpha-beta search, and UCI protocol",
+  "type": "module",
+  "scripts": {
+    "test": "node --test src/**/*.test.js"
+  }
+}
