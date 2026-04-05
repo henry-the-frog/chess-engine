@@ -1,7 +1,7 @@
 // eval.js — Position evaluation
 // Returns score in centipawns from the perspective of the side to move
 
-import { Board, WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, iterBits, fileOf, rankOf, FILE_A, FILE_H, RANK_1, RANK_8, bishopAttacks, rookAttacks, queenAttacks } from './board.js';
+import { Board, WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, iterBits, fileOf, rankOf, FILE_A, FILE_H, RANK_1, RANK_2, RANK_7, RANK_8, bishopAttacks, rookAttacks, queenAttacks, knightAttacks, popCount } from './board.js';
 
 const PIECE_VALUES = [100, 320, 330, 500, 900, 0]; // P, N, B, R, Q, K
 
@@ -120,13 +120,125 @@ export function evaluate(board) {
   if (whiteBishops >= 2) score += 30;
   if (blackBishops >= 2) score -= 30;
 
-  // Mobility (simplified — count legal move options)
+  // Mobility (count actual attack squares)
   const occ = board.occupied();
+  let whiteMobility = 0, blackMobility = 0;
+
+  // Knight mobility
   for (const sq of iterBits(board.pieces[WHITE][KNIGHT])) {
-    score += 4; // knight mobility bonus per piece
+    const attacks = knightAttacks[sq] & ~board.colorBB(WHITE);
+    whiteMobility += popCount(attacks);
   }
   for (const sq of iterBits(board.pieces[BLACK][KNIGHT])) {
-    score -= 4;
+    const attacks = knightAttacks[sq] & ~board.colorBB(BLACK);
+    blackMobility += popCount(attacks);
+  }
+
+  // Bishop mobility
+  for (const sq of iterBits(board.pieces[WHITE][BISHOP])) {
+    const attacks = bishopAttacks(sq, occ) & ~board.colorBB(WHITE);
+    whiteMobility += popCount(attacks);
+  }
+  for (const sq of iterBits(board.pieces[BLACK][BISHOP])) {
+    const attacks = bishopAttacks(sq, occ) & ~board.colorBB(BLACK);
+    blackMobility += popCount(attacks);
+  }
+
+  // Rook mobility
+  for (const sq of iterBits(board.pieces[WHITE][ROOK])) {
+    const attacks = rookAttacks(sq, occ) & ~board.colorBB(WHITE);
+    whiteMobility += popCount(attacks);
+  }
+  for (const sq of iterBits(board.pieces[BLACK][ROOK])) {
+    const attacks = rookAttacks(sq, occ) & ~board.colorBB(BLACK);
+    blackMobility += popCount(attacks);
+  }
+
+  // Queen mobility (weighted less to avoid queen wandering)
+  for (const sq of iterBits(board.pieces[WHITE][QUEEN])) {
+    const attacks = queenAttacks(sq, occ) & ~board.colorBB(WHITE);
+    whiteMobility += popCount(attacks) / 2;
+  }
+  for (const sq of iterBits(board.pieces[BLACK][QUEEN])) {
+    const attacks = queenAttacks(sq, occ) & ~board.colorBB(BLACK);
+    blackMobility += popCount(attacks) / 2;
+  }
+
+  score += (whiteMobility - blackMobility) * 3; // 3cp per mobility square
+
+  // Pawn structure
+  const whitePawns = board.pieces[WHITE][PAWN];
+  const blackPawns = board.pieces[BLACK][PAWN];
+
+  // Doubled pawns penalty
+  for (let f = 0; f < 8; f++) {
+    const fileMask = FILE_A << BigInt(f);
+    const wPawnsOnFile = popCount(whitePawns & fileMask);
+    const bPawnsOnFile = popCount(blackPawns & fileMask);
+    if (wPawnsOnFile > 1) score -= (wPawnsOnFile - 1) * 15;
+    if (bPawnsOnFile > 1) score += (bPawnsOnFile - 1) * 15;
+  }
+
+  // Isolated pawn penalty
+  for (const sq of iterBits(whitePawns)) {
+    const f = fileOf(sq);
+    const adjacentFiles = (f > 0 ? FILE_A << BigInt(f - 1) : 0n) | (f < 7 ? FILE_A << BigInt(f + 1) : 0n);
+    if ((whitePawns & adjacentFiles) === 0n) score -= 10;
+  }
+  for (const sq of iterBits(blackPawns)) {
+    const f = fileOf(sq);
+    const adjacentFiles = (f > 0 ? FILE_A << BigInt(f - 1) : 0n) | (f < 7 ? FILE_A << BigInt(f + 1) : 0n);
+    if ((blackPawns & adjacentFiles) === 0n) score += 10;
+  }
+
+  // Rook on open/semi-open file
+  for (const sq of iterBits(board.pieces[WHITE][ROOK])) {
+    const fileMask = FILE_A << BigInt(fileOf(sq));
+    if ((whitePawns & fileMask) === 0n) {
+      score += (blackPawns & fileMask) === 0n ? 20 : 10; // open vs semi-open
+    }
+  }
+  for (const sq of iterBits(board.pieces[BLACK][ROOK])) {
+    const fileMask = FILE_A << BigInt(fileOf(sq));
+    if ((blackPawns & fileMask) === 0n) {
+      score -= (whitePawns & fileMask) === 0n ? 20 : 10;
+    }
+  }
+
+  // King safety — pawn shield
+  if (!endgame) {
+    for (const sq of iterBits(board.pieces[WHITE][KING])) {
+      const f = fileOf(sq);
+      const r = rankOf(sq);
+      if (r <= 1) { // King on back ranks
+        let shield = 0;
+        for (let df = -1; df <= 1; df++) {
+          const sf = f + df;
+          if (sf >= 0 && sf < 8) {
+            const shieldMask = FILE_A << BigInt(sf);
+            const frontRanks = RANK_2 | (RANK_2 << 8n);
+            if ((whitePawns & shieldMask & frontRanks) !== 0n) shield++;
+          }
+        }
+        score += shield * 10;
+      }
+    }
+    for (const sq of iterBits(board.pieces[BLACK][KING])) {
+      const f = fileOf(sq);
+      const r = rankOf(sq);
+      if (r >= 6) { // King on back ranks
+        let shield = 0;
+        for (let df = -1; df <= 1; df++) {
+          const sf = f + df;
+          if (sf >= 0 && sf < 8) {
+            const shieldMask = FILE_A << BigInt(sf);
+            const frontRanks = RANK_7 | (RANK_7 >> 8n);
+            if ((blackPawns & shieldMask & frontRanks) !== 0n) shield++;
+          }
+        }
+        score -= shield * 10;
+      }
+    }
   }
 
   // Return from side-to-move perspective
